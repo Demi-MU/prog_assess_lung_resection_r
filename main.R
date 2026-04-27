@@ -108,9 +108,6 @@ main <- function() {
     y_proba,
     file.path(OUTPUT_FIGURES, "calibration.png")
   )
-
-  vif <- vif_test(model)
-  readr::write_csv(vif, file.path(OUTPUT_TABLES, "vif.csv"))
   saveRDS(model, MODEL_PATH)
   saveRDS(df, DATA_PROCESSED)
 
