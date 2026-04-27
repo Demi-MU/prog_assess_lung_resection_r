@@ -19,6 +19,32 @@ save_outcome_distribution <- function(y, csv_path, fig_path, title = "Outcome di
   ggplot2::ggsave(fig_path, p, width = 5, height = 4, dpi = 200)
 }
 
+save_outcome_definition_distribution <- function(
+  distribution,
+  csv_path,
+  fig_path,
+  title = "Outcome distribution by definition"
+) {
+  .ensure_parent_dir(csv_path)
+  .ensure_parent_dir(fig_path)
+
+  readr::write_csv(distribution, csv_path)
+
+  plot_df <- distribution
+  plot_df$class <- factor(plot_df$class, levels = c("0", "1", "NA"))
+
+  p <- ggplot2::ggplot(plot_df, ggplot2::aes(
+    x = class,
+    y = count,
+    fill = definition
+  )) +
+    ggplot2::geom_col(position = "dodge") +
+    ggplot2::labs(title = title, x = "Class", y = "Count", fill = "Definition") +
+    ggplot2::theme_minimal()
+
+  ggplot2::ggsave(fig_path, p, width = 7, height = 4, dpi = 200)
+}
+
 save_missingness_top <- function(
   df, csv_path, fig_path, top_n = 30, title = "Missingness (top variables)"
 ) {
@@ -57,7 +83,8 @@ bootstrap_auc_ci <- function(y_true, y_proba, n_boot = 2000, seed = 42, alpha = 
     yt <- y_true[idx]
     yp <- y_proba[idx]
     if (length(unique(yt)) < 2) next
-    aucs <- c(aucs, as.numeric(pROC::auc(yt, yp)))
+    roc_obj <- pROC::roc(yt, yp, quiet = TRUE)
+    aucs <- c(aucs, as.numeric(pROC::auc(roc_obj)))
   }
 
   if (length(aucs) == 0) return(c(NA_real_, NA_real_))
@@ -101,6 +128,11 @@ save_logistic_coefficients <- function(
   feature_names,
   coef,
   intercept,
+  std_error = NULL,
+  z_value = NULL,
+  p_value = NULL,
+  conf_low = NULL,
+  conf_high = NULL,
   csv_path,
   forest_fig_path,
   top_n = 30,
@@ -109,23 +141,58 @@ save_logistic_coefficients <- function(
   .ensure_parent_dir(csv_path)
   .ensure_parent_dir(forest_fig_path)
 
+  align_numeric <- function(x) {
+    if (is.null(x)) return(rep(NA_real_, length(feature_names)))
+    as.numeric(x)
+  }
+
+  std_error <- align_numeric(std_error)
+  z_value <- align_numeric(z_value)
+  p_value <- align_numeric(p_value)
+  conf_low <- align_numeric(conf_low)
+  conf_high <- align_numeric(conf_high)
+
   dfc <- data.frame(
     feature = feature_names,
     coef = as.numeric(coef),
+    std_error = std_error,
+    z_value = z_value,
+    p_value = p_value,
+    conf_low_logit = conf_low,
+    conf_high_logit = conf_high,
     odds_ratio = exp(as.numeric(coef)),
+    or_ci_low = exp(conf_low),
+    or_ci_high = exp(conf_high),
     abs_coef = abs(as.numeric(coef)),
     stringsAsFactors = FALSE
   )
   dfc <- dfc[order(-dfc$abs_coef), , drop = FALSE]
   readr::write_csv(dfc, csv_path)
 
-  plot_df <- utils::head(dfc, top_n)
+  plot_df <- dfc[
+    is.finite(dfc$odds_ratio) &
+      is.finite(dfc$or_ci_low) &
+      is.finite(dfc$or_ci_high) &
+      dfc$odds_ratio > 0 &
+      dfc$or_ci_low > 0 &
+      dfc$or_ci_high > 0,
+    ,
+    drop = FALSE
+  ]
+  plot_df <- plot_df[order(-plot_df$abs_coef), , drop = FALSE]
+  plot_df <- utils::head(plot_df, top_n)
   plot_df <- plot_df[order(plot_df$odds_ratio), , drop = FALSE]
+  plot_df$feature_plot <- factor(plot_df$feature, levels = plot_df$feature)
 
   p <- ggplot2::ggplot(plot_df, ggplot2::aes(
     x = odds_ratio,
-    y = stats::reorder(feature, odds_ratio)
+    y = feature_plot
   )) +
+    ggplot2::geom_segment(
+      ggplot2::aes(x = or_ci_low, xend = or_ci_high, y = feature_plot, yend = feature_plot),
+      color = "#54A24B",
+      linewidth = 0.7
+    ) +
     ggplot2::geom_point(color = "#54A24B", size = 2) +
     ggplot2::geom_vline(xintercept = 1, linetype = "dashed") +
     ggplot2::scale_x_log10() +
@@ -141,6 +208,99 @@ save_logistic_coefficients <- function(
   )
 }
 
+parse_binary_complication <- function(x) {
+  x_chr <- toupper(trimws(as.character(x)))
+  x_chr[x_chr %in% c("", "NULL", "NA", "N/A", "-99")] <- NA_character_
+
+  yes <- c("Y", "YES", "1", "TRUE", "OCCURRENCE", "COMPLICATION")
+  no <- c("N", "NO", "0", "FALSE", "NO COMPLICATION", "NONE")
+
+  out <- rep(NA_integer_, length(x_chr))
+  out[x_chr %in% yes] <- 1L
+  out[x_chr %in% no] <- 0L
+  out[!is.na(x_chr) & is.na(out)] <- 1L
+  out
+}
+
+save_complication_mortality_association <- function(
+  df,
+  y,
+  complications,
+  csv_path
+) {
+  .ensure_parent_dir(csv_path)
+
+  rows <- lapply(complications, function(complication) {
+    if (!(complication %in% names(df))) {
+      return(data.frame(
+        complication = complication,
+        n_with_complication = NA_integer_,
+        deaths_with_complication = NA_integer_,
+        mortality_rate_with_complication = NA_real_,
+        n_without_complication = NA_integer_,
+        deaths_without_complication = NA_integer_,
+        mortality_rate_without_complication = NA_real_,
+        odds_ratio = NA_real_,
+        ci_low = NA_real_,
+        ci_high = NA_real_,
+        p_value = NA_real_,
+        note = "variable_not_found",
+        stringsAsFactors = FALSE
+      ))
+    }
+
+    x <- parse_binary_complication(df[[complication]])
+    complete <- !is.na(x) & !is.na(y)
+    x <- x[complete]
+    yy <- y[complete]
+
+    if (length(x) == 0 || length(unique(x)) < 2) {
+      return(data.frame(
+        complication = complication,
+        n_with_complication = sum(x == 1L),
+        deaths_with_complication = sum(x == 1L & yy == 1L),
+        mortality_rate_with_complication = NA_real_,
+        n_without_complication = sum(x == 0L),
+        deaths_without_complication = sum(x == 0L & yy == 1L),
+        mortality_rate_without_complication = NA_real_,
+        odds_ratio = NA_real_,
+        ci_low = NA_real_,
+        ci_high = NA_real_,
+        p_value = NA_real_,
+        note = "insufficient_binary_variation",
+        stringsAsFactors = FALSE
+      ))
+    }
+
+    a <- sum(x == 1L & yy == 1L)
+    b <- sum(x == 1L & yy == 0L)
+    c <- sum(x == 0L & yy == 1L)
+    d <- sum(x == 0L & yy == 0L)
+    tab <- matrix(c(a, b, c, d), nrow = 2, byrow = TRUE)
+    ft <- stats::fisher.test(tab)
+
+    data.frame(
+      complication = complication,
+      n_with_complication = a + b,
+      deaths_with_complication = a,
+      mortality_rate_with_complication = if ((a + b) > 0) a / (a + b) else NA_real_,
+      n_without_complication = c + d,
+      deaths_without_complication = c,
+      mortality_rate_without_complication = if ((c + d) > 0) c / (c + d) else NA_real_,
+      odds_ratio = as.numeric(ft$estimate),
+      ci_low = as.numeric(ft$conf.int[1]),
+      ci_high = as.numeric(ft$conf.int[2]),
+      p_value = ft$p.value,
+      note = "",
+      stringsAsFactors = FALSE
+    )
+  })
+
+  out <- do.call(rbind, rows)
+  readr::write_csv(out, csv_path)
+  out
+}
+
 save_metrics_summary <- function(
   y_true,
   y_proba,
@@ -151,7 +311,8 @@ save_metrics_summary <- function(
 ) {
   .ensure_parent_dir(csv_path)
 
-  auc <- as.numeric(pROC::auc(y_true, y_proba))
+  roc_obj <- pROC::roc(y_true, y_proba, quiet = TRUE)
+  auc <- as.numeric(pROC::auc(roc_obj))
   ci_low <- NA_real_
   ci_high <- NA_real_
   if (bootstrap_ci) {
@@ -161,30 +322,43 @@ save_metrics_summary <- function(
   }
 
   brier <- mean((as.numeric(y_true) - as.numeric(y_proba))^2)
-  thr <- if (is.null(threshold)) youden_threshold(y_true, y_proba) else as.numeric(threshold)
-  if (is.na(thr) || !is.finite(thr)) thr <- 0.5
-  y_pred <- as.integer(y_proba >= thr)
+  thresholds <- if (is.null(threshold)) {
+    c("0.5" = 0.5, "youden" = youden_threshold(y_true, y_proba))
+  } else {
+    stats::setNames(as.numeric(threshold), "custom")
+  }
+  thresholds[!is.finite(thresholds) | is.na(thresholds)] <- 0.5
 
-  cm <- table(
-    truth = factor(y_true, levels = c(0, 1)),
-    pred = factor(y_pred, levels = c(0, 1))
-  )
-  tn <- as.integer(cm["0", "0"])
-  fp <- as.integer(cm["0", "1"])
-  fn <- as.integer(cm["1", "0"])
-  tp <- as.integer(cm["1", "1"])
+  rows <- lapply(names(thresholds), function(threshold_type) {
+    thr <- as.numeric(thresholds[[threshold_type]])
+    y_pred <- as.integer(y_proba >= thr)
 
+    cm <- table(
+      truth = factor(y_true, levels = c(0, 1)),
+      pred = factor(y_pred, levels = c(0, 1))
+    )
+
+    data.frame(
+      threshold_type = threshold_type,
+      threshold = thr,
+      tn = as.integer(cm["0", "0"]),
+      fp = as.integer(cm["0", "1"]),
+      fn = as.integer(cm["1", "0"]),
+      tp = as.integer(cm["1", "1"]),
+      stringsAsFactors = FALSE
+    )
+  })
+
+  out <- do.call(rbind, rows)
   out <- data.frame(
     auc = auc,
     auc_ci_low = ci_low,
     auc_ci_high = ci_high,
     brier = brier,
-    threshold = thr,
-    tn = tn,
-    fp = fp,
-    fn = fn,
-    tp = tp
+    out,
+    row.names = NULL
   )
+
   readr::write_csv(out, csv_path)
   out
 }

@@ -66,6 +66,21 @@ drop_problematic_columns <- function(X_train, y_train, min_nonzero = 5) {
     X <- X[, setdiff(names(X), sep_drop), drop = FALSE]
   }
 
+  # Drop exact linear dependencies to avoid rank-deficient logistic fits.
+  matrix_ready <- vapply(
+    X,
+    function(col) is.numeric(col) || is.integer(col) || is.logical(col),
+    logical(1)
+  )
+  if (ncol(X) > 1 && all(matrix_ready)) {
+    x_mat <- as.matrix(X)
+    qr_x <- qr(x_mat)
+    if (qr_x$rank < ncol(x_mat)) {
+      keep_idx <- sort(qr_x$pivot[seq_len(qr_x$rank)])
+      X <- X[, keep_idx, drop = FALSE]
+    }
+  }
+
   list(X_train = X, keep_cols = names(X))
 }
 
@@ -85,7 +100,8 @@ evaluate_model <- function(model, X_test, y_test, threshold = 0.5) {
   test_df <- data.frame(X_test, check.names = FALSE)
   y_proba <- as.numeric(stats::predict(model, newdata = test_df, type = "response"))
   y_pred <- as.integer(y_proba >= threshold)
-  auc <- as.numeric(pROC::auc(y_test, y_proba))
+  roc_obj <- pROC::roc(y_test, y_proba, quiet = TRUE)
+  auc <- as.numeric(pROC::auc(roc_obj))
 
   cm <- table(
     truth = factor(y_test, levels = c(0, 1)),
