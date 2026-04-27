@@ -59,13 +59,16 @@ main <- function() {
   )
 
   split <- split_data(X, y, test_size = TEST_SIZE, random_state = RANDOM_SEED)
-  model <- train_logistic(split$X_train, split$y_train)
+  filtered <- drop_problematic_columns(split$X_train, split$y_train, min_nonzero = 5)
+  X_train_f <- filtered$X_train
+  X_test_f <- apply_column_filter(split$X_test, filtered$keep_cols)
+  model <- train_logistic(X_train_f, split$y_train)
 
-  eval <- evaluate_model(model, split$X_test, split$y_test)
+  eval <- evaluate_model(model, X_test_f, split$y_test)
   y_proba <- eval$y_proba
 
   save_predictions(
-    X_test = split$X_test,
+    X_test = X_test_f,
     y_test = split$y_test,
     y_proba = y_proba,
     csv_path = file.path(OUTPUT_TABLES, "predictions_test.csv")

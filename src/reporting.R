@@ -66,7 +66,8 @@ bootstrap_auc_ci <- function(y_true, y_proba, n_boot = 2000, seed = 42, alpha = 
 
 youden_threshold <- function(y_true, y_proba) {
   roc_obj <- pROC::roc(y_true, y_proba, quiet = TRUE)
-  as.numeric(pROC::coords(roc_obj, x = "best", best.method = "youden", ret = "threshold"))
+  thr <- pROC::coords(roc_obj, x = "best", best.method = "youden", ret = "threshold")
+  as.numeric(unlist(thr, use.names = FALSE))[1]
 }
 
 save_roc_plot <- function(y_true, y_proba, fig_path, title = "ROC curve") {
@@ -161,6 +162,7 @@ save_metrics_summary <- function(
 
   brier <- mean((as.numeric(y_true) - as.numeric(y_proba))^2)
   thr <- if (is.null(threshold)) youden_threshold(y_true, y_proba) else as.numeric(threshold)
+  if (is.na(thr) || !is.finite(thr)) thr <- 0.5
   y_pred <- as.integer(y_proba >= thr)
 
   cm <- table(

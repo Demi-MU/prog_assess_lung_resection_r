@@ -10,7 +10,7 @@ TEST_SIZE <- 0.2
 TARGET <- "MORTALITY_30D"
 
 CATEGORICAL_FEATURES <- c(
-  "PRNCPTX", "Open vs VATS", "Resection", "PODIAG", "PODIAGTX", "TRANST",
+  "Open vs VATS", "Resection", "TRANST",
   "Age_Group", "SEX", "Race", "ANESTHES", "ATTEND", "Attend vs Resident",
   "Thoracic Surgeon", "SURGSPEC", "BMI_Group", "DIABETES", "SMOKE", "ETOH",
   "DYSPNEA", "DNR", "FNCTSTATUS", "VENTILAT", "HXCOPD", "CPNEUMON", "ASCITES",
@@ -18,16 +18,12 @@ CATEGORICAL_FEATURES <- c(
   "HXPVD", "RESTPAIN", "RENAFAIL", "DIALYSIS", "IMPSENS", "COMA", "HEMI",
   "HXTIA", "CVA", "CVANO", "TUMORCNS", "Para", "QUAD", "DISCANCR", "WNDINF",
   "STEROID", "WTLOSS", "BLEEDDIS", "TRANSFUS", "CHEMO", "RADIO", "PrOper30",
-  "Leukocytosis", "Anemia", "WNDCLAS", "ASACLAS", "Transfusion", "Wound Infection",
-  "Pneumonia", "PULEMBOL", "Prologned/re Intubation", "RENAINSF", "Renal Failure",
-  "NEURODEF", "Stroke", "CDARREST", "CDMI", "OTHBLEED", "OTHDVT", "Sepsis/Shock",
-  "RETURNOR", "Death"
+  "Leukocytosis", "Anemia", "WNDCLAS", "ASACLAS"
 )
 
 NUMERICAL_FEATURES <- c(
-  "CaseID", "CPT", "WORKRVU", "Age", "HEIGHT", "WEIGHT", "BMI", "PACKS",
+  "WORKRVU", "Age", "HEIGHT", "WEIGHT", "BMI", "PACKS",
   "PRSODM", "PRBUN", "PRCREAT", "PRALBUM", "PRBILI", "PRSGOT", "PRALKPH",
   "PRWBC", "PRHCT", "PRPLATE", "PRPTT", "PRINR", "PGY", "RBC", "ANESURG",
-  "SURGANE", "DPATRM", "ANETIME", "OPTIME", "TOTSLOS", "DSDtoHD", "DOptoDis",
-  "Days to f/u"
+  "SURGANE", "DPATRM", "ANETIME", "OPTIME"
 )
